@@ -1,5 +1,10 @@
 package dev.prestige.client.module;
 
+import dev.prestige.client.module.setting.Setting;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Consumer;
 import net.minecraft.client.MinecraftClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +28,8 @@ public abstract class Module {
     private final String description;
     private final Category category;
     private final int defaultKeybind;
+    private final List<Setting<?>> settings = new ArrayList<>();
+    private Consumer<Module> toggleListener = module -> { };
     private boolean enabled;
     private int keybind;
 
@@ -36,6 +43,21 @@ public abstract class Module {
         this.category = category;
         this.defaultKeybind = defaultKeybind;
         this.keybind = defaultKeybind;
+    }
+
+    /** Registers a setting; call from the subclass constructor and keep the returned reference. */
+    protected final <S extends Setting<?>> S add(S setting) {
+        settings.add(setting);
+        return setting;
+    }
+
+    public final List<Setting<?>> getSettings() {
+        return Collections.unmodifiableList(settings);
+    }
+
+    /** Set by the {@link ModuleManager} so it can broadcast toggles. */
+    final void setToggleListener(Consumer<Module> listener) {
+        this.toggleListener = listener;
     }
 
     /**
@@ -71,6 +93,7 @@ public abstract class Module {
         } catch (RuntimeException e) {
             LOGGER.error("Module '{}' threw in {}", name, enabled ? "onEnable" : "onDisable", e);
         }
+        toggleListener.accept(this);
     }
 
     public final boolean isEnabled() {

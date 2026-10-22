@@ -5,6 +5,7 @@ import dev.prestige.client.gui.Bounds;
 import dev.prestige.client.gui.GuiContext;
 import dev.prestige.client.gui.component.Card;
 import dev.prestige.client.gui.component.PageHeader;
+import dev.prestige.client.gui.component.ScrollArea;
 import dev.prestige.client.gui.component.ToggleSwitch;
 import dev.prestige.client.gui.render.Animation;
 import dev.prestige.client.gui.render.RenderUtil;
@@ -32,7 +33,13 @@ public final class SettingsPage implements Page {
             new Setting("Module descriptions", "Show a short description on every module card",
                     s -> s.descriptions, s -> s.descriptions = !s.descriptions),
             new Setting("Grid view", "Show modules in two columns",
-                    s -> s.gridView, s -> s.gridView = !s.gridView));
+                    s -> s.gridView, s -> s.gridView = !s.gridView),
+            new Setting("Toast notifications", "Show a card in the corner when a module is toggled in game",
+                    s -> s.toasts, s -> s.toasts = !s.toasts),
+            new Setting("Menu sounds", "Play a soft click when using the menu",
+                    s -> s.sounds, s -> s.sounds = !s.sounds));
+    private final ScrollArea scroll = new ScrollArea();
+    private Bounds viewport = new Bounds(0, 0, 0, 0);
     private final List<Bounds> hits = new ArrayList<>();
 
     private static final class Setting {
@@ -65,14 +72,20 @@ public final class SettingsPage implements Page {
         RenderUtil.rect(draw, left, area.y() + Theme.CONTENT_TOP - 6, width, 1, Theme.DIVIDER);
 
         hits.clear();
-        int y = area.y() + Theme.CONTENT_TOP;
+        viewport = new Bounds(left, area.y() + Theme.CONTENT_TOP, width, area.bottom() - pad - (area.y() + Theme.CONTENT_TOP));
+        int contentHeight = settings.size() * (CARD_HEIGHT + Theme.CARD_GAP) - Theme.CARD_GAP;
+        scroll.update(contentHeight, viewport.height(), deltaSeconds);
+        int cardWidth = contentHeight > viewport.height() ? width - 6 : width;
+        draw.enableScissor(viewport.x(), viewport.y(), viewport.right(), viewport.bottom());
+        int y = viewport.y() - scroll.getOffset();
         for (Setting setting : settings) {
-            Bounds card = new Bounds(left, y, width, CARD_HEIGHT);
+            Bounds card = new Bounds(left, y, cardWidth, CARD_HEIGHT);
             boolean on = setting.getter.test(context.settings());
             if (setting.progress < 0) {
                 setting.progress = on ? 1f : 0f;
             }
-            setting.hover = Animation.approach(setting.hover, card.contains(mouseX, mouseY) ? 1f : 0f, deltaSeconds, Theme.HOVER_SPEED);
+            boolean hovered = viewport.contains(mouseX, mouseY) && card.contains(mouseX, mouseY);
+            setting.hover = Animation.approach(setting.hover, hovered ? 1f : 0f, deltaSeconds, Theme.HOVER_SPEED);
             setting.progress = Animation.approach(setting.progress, on ? 1f : 0f, deltaSeconds, Theme.TOGGLE_SPEED);
 
             Card.render(draw, card.x(), card.y(), card.width(), card.height(), setting.hover);
@@ -83,11 +96,22 @@ public final class SettingsPage implements Page {
             hits.add(card);
             y += CARD_HEIGHT + Theme.CARD_GAP;
         }
+        draw.disableScissor();
+        scroll.renderScrollbar(draw, viewport.right() - 2, viewport.y(), viewport.height(), accent);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+        if (!viewport.contains(mouseX, mouseY)) {
+            return false;
+        }
+        scroll.scroll(amount);
+        return true;
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+        if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT || !viewport.contains(mouseX, mouseY)) {
             return false;
         }
         for (int i = 0; i < hits.size(); i++) {

@@ -8,6 +8,8 @@ import dev.prestige.client.gui.component.PageHeader;
 import dev.prestige.client.gui.component.ScrollArea;
 import dev.prestige.client.gui.component.TextField;
 import dev.prestige.client.gui.component.ToggleSwitch;
+import dev.prestige.client.gui.component.setting.SettingRow;
+import dev.prestige.client.gui.component.setting.SettingRows;
 import dev.prestige.client.gui.render.Animation;
 import dev.prestige.client.gui.render.Icons;
 import dev.prestige.client.gui.render.RenderUtil;
@@ -38,7 +40,8 @@ public final class ModulesPage implements Page {
     private static final int SEARCH_WIDTH = 132;
     private static final int CARD_HEIGHT = 28;
     private static final int CARD_HEIGHT_COMPACT = 20;
-    private static final int EXPANDED_EXTRA = 22;
+    private static final int KEYBIND_ROW_HEIGHT = 22;
+    private static final int EXPANDED_PADDING = 4;
     private static final int VIEW_TOGGLE_SIZE = 13;
 
     private final GuiContext context;
@@ -52,13 +55,18 @@ public final class ModulesPage implements Page {
     private Bounds gridToggle = new Bounds(0, 0, 0, 0);
 
     private static final class CardState {
+        List<SettingRow<?>> rows;
         float hover;
         float enabled;
         float expand;
         boolean expanded;
     }
 
-    private record CardHit(Module module, Bounds card, Bounds chevron, @Nullable Bounds keyChip) {
+    @Nullable
+    private SettingRow<?> draggingRow;
+
+    private record CardHit(Module module, Bounds card, int headerBottom, Bounds chevron, @Nullable Bounds keyChip,
+                           boolean interactive) {
     }
 
     public ModulesPage(GuiContext context) {
@@ -89,6 +97,7 @@ public final class ModulesPage implements Page {
         return states.computeIfAbsent(module, m -> {
             CardState state = new CardState();
             state.enabled = m.isEnabled() ? 1f : 0f;
+            state.rows = SettingRows.createAll(m.getSettings());
             return state;
         });
     }
@@ -164,7 +173,7 @@ public final class ModulesPage implements Page {
                 if (index >= modules.size()) {
                     break;
                 }
-                int height = baseHeight + Math.round(EXPANDED_EXTRA * state(modules.get(index)).expand);
+                int height = baseHeight + Math.round(expandedHeight(modules.get(index)) * state(modules.get(index)).expand);
                 positions.add(new int[] {col * (columnWidth + Theme.CARD_GAP), contentHeight, height});
                 rowHeight = Math.max(rowHeight, height);
             }
@@ -182,13 +191,24 @@ public final class ModulesPage implements Page {
                 continue;
             }
             boolean hovered = viewport.contains(mouseX, mouseY) && card.contains(mouseX, mouseY);
-            renderCard(draw, font, modules.get(i), card, baseHeight, hovered, deltaSeconds);
+            renderCard(draw, font, modules.get(i), card, baseHeight, hovered, mouseX, mouseY, deltaSeconds);
         }
         draw.disableScissor();
     }
 
+    /** Height of the keybind row plus every visible setting row. */
+    private int expandedHeight(Module module) {
+        int height = KEYBIND_ROW_HEIGHT + EXPANDED_PADDING;
+        for (SettingRow<?> row : state(module).rows) {
+            if (row.getSetting().isVisible()) {
+                height += row.height();
+            }
+        }
+        return height;
+    }
+
     private void renderCard(DrawContext draw, TextRenderer font, Module module, Bounds card, int baseHeight,
-                            boolean hovered, float deltaSeconds) {
+                            boolean hovered, int mouseX, int mouseY, float deltaSeconds) {
         CardState state = state(module);
         state.hover = Animation.approach(state.hover, hovered ? 1f : 0f, deltaSeconds, Theme.HOVER_SPEED);
         int moduleAccent = context.accent().color(module.getCategory());
@@ -226,19 +246,27 @@ public final class ModulesPage implements Page {
             int rowY = card.y() + baseHeight;
             RenderUtil.rect(draw, card.x() + 10, rowY, card.width() - 20, 1, Theme.DIVIDER);
             Typography.draw(draw, font, Font.BODY, "Keybind", textX,
-                    Typography.centerY(Font.BODY, rowY, EXPANDED_EXTRA), Theme.TEXT_SECONDARY);
+                    Typography.centerY(Font.BODY, rowY, KEYBIND_ROW_HEIGHT), Theme.TEXT_SECONDARY);
             Bounds chip = KeyChip.render(draw, font, KeyChip.keyName(module.getKeybind()), card.right() - 10,
-                    rowY + (EXPANDED_EXTRA - KeyChip.HEIGHT) / 2, context.isListening(module), !module.hasKeybind(),
+                    rowY + (KEYBIND_ROW_HEIGHT - KeyChip.HEIGHT) / 2, context.isListening(module), !module.hasKeybind(),
                     moduleAccent);
             if (state.expand > 0.99f) {
                 keyChip = chip;
+            }
+            rowY += KEYBIND_ROW_HEIGHT;
+            for (SettingRow<?> row : state.rows) {
+                if (!row.getSetting().isVisible()) {
+                    continue;
+                }
+                row.render(draw, font, textX, rowY, card.width() - 20, mouseX, mouseY, moduleAccent, deltaSeconds);
+                rowY += row.height();
             }
         }
         if (clip) {
             draw.disableScissor();
         }
 
-        hits.add(new CardHit(module, card, chevron, keyChip));
+        hits.add(new CardHit(module, card, card.y() + baseHeight, chevron, keyChip, state.expand > 0.99f));
     }
 
     @Override
@@ -262,9 +290,27 @@ public final class ModulesPage implements Page {
                 continue;
             }
             CardState state = state(hit.module());
-            if (hit.keyChip() != null && hit.keyChip().contains(mouseX, mouseY)) {
-                context.startListening(hit.module());
-            } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT
+            if (mouseY >= hit.headerBottom()) {
+                // Expanded area: keybind chip and setting rows. Never toggles the module.
+                if (!hit.interactive()) {
+                    return true;
+                }
+                if (hit.keyChip() != null && hit.keyChip().contains(mouseX, mouseY)) {
+                    context.startListening(hit.module());
+                    return true;
+                }
+                for (SettingRow<?> row : state.rows) {
+                    if (row.getSetting().isVisible() && row.isMouseOver(mouseX, mouseY)
+                            && row.mouseClicked(mouseX, mouseY, button)) {
+                        if (row.isDragging()) {
+                            draggingRow = row;
+                        }
+                        return true;
+                    }
+                }
+                return true;
+            }
+            if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT
                     || (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && hit.chevron().contains(mouseX, mouseY))) {
                 state.expanded = !state.expanded;
             } else if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
@@ -276,6 +322,25 @@ public final class ModulesPage implements Page {
             return true;
         }
         return false;
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY) {
+        if (draggingRow == null) {
+            return false;
+        }
+        draggingRow.mouseDragged(mouseX, mouseY);
+        return true;
+    }
+
+    @Override
+    public boolean mouseReleased() {
+        if (draggingRow == null) {
+            return false;
+        }
+        draggingRow.mouseReleased();
+        draggingRow = null;
+        return true;
     }
 
     @Override

@@ -8,6 +8,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import dev.prestige.client.module.Module;
 import dev.prestige.client.module.ModuleManager;
+import dev.prestige.client.module.setting.Setting;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -174,6 +175,15 @@ public final class ConfigManager {
             if (isNumber(entry, "keybind")) {
                 module.setKeybind(entry.get("keybind").getAsInt());
             }
+            JsonObject settings = getObject(entry, "settings");
+            if (settings != null) {
+                for (Setting<?> setting : module.getSettings()) {
+                    JsonElement value = settings.get(setting.getName());
+                    if (value != null) {
+                        setting.fromJson(value);
+                    }
+                }
+            }
             if (isBoolean(entry, "enabled")) {
                 module.setEnabled(entry.get("enabled").getAsBoolean());
             }
@@ -186,6 +196,13 @@ public final class ConfigManager {
             JsonObject entry = new JsonObject();
             entry.addProperty("enabled", module.isEnabled());
             entry.addProperty("keybind", module.getKeybind());
+            if (!module.getSettings().isEmpty()) {
+                JsonObject settings = new JsonObject();
+                for (Setting<?> setting : module.getSettings()) {
+                    settings.add(setting.getName(), setting.toJson());
+                }
+                entry.add("settings", settings);
+            }
             section.add(module.getName(), entry);
         }
         return section;
@@ -204,6 +221,8 @@ public final class ConfigManager {
         gui.animations = loaded.animations;
         gui.descriptions = loaded.descriptions;
         gui.gridView = loaded.gridView;
+        gui.toasts = loaded.toasts;
+        gui.sounds = loaded.sounds;
     }
 
     private static JsonObject readObject(Path path) throws IOException {

@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +29,7 @@ public final class ModuleManager {
     private final Map<String, Module> byName = new LinkedHashMap<>();
     private final Map<Class<? extends Module>, Module> byType = new HashMap<>();
     private final Map<Category, List<Module>> byCategory = new EnumMap<>(Category.class);
+    private final List<Consumer<Module>> toggleListeners = new CopyOnWriteArrayList<>();
 
     public ModuleManager() {
         for (Category category : Category.values()) {
@@ -57,7 +60,19 @@ public final class ModuleManager {
         byName.put(key, module);
         byType.put(module.getClass(), module);
         byCategory.get(module.getCategory()).add(module);
+        module.setToggleListener(this::fireToggle);
         return module;
+    }
+
+    /** Called after any module is switched on or off, including from config loads. */
+    public void addToggleListener(Consumer<Module> listener) {
+        toggleListeners.add(listener);
+    }
+
+    private void fireToggle(Module module) {
+        for (Consumer<Module> listener : toggleListeners) {
+            listener.accept(module);
+        }
     }
 
     public Optional<Module> get(String name) {

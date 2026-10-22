@@ -18,6 +18,15 @@ public interface Page {
         return false;
     }
 
+    /** Continues a drag started by {@link #mouseClicked}; coordinates are absolute. */
+    default boolean mouseDragged(double mouseX, double mouseY) {
+        return false;
+    }
+
+    default boolean mouseReleased() {
+        return false;
+    }
+
     default boolean mouseScrolled(double mouseX, double mouseY, double amount) {
         return false;
     }

@@ -5,7 +5,10 @@ import dev.prestige.client.config.GuiSettings;
 import dev.prestige.client.gui.theme.Accent;
 import dev.prestige.client.module.Module;
 import dev.prestige.client.module.ModuleManager;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.client.option.KeyBinding;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
@@ -44,6 +47,14 @@ public final class GuiContext {
 
     public Accent accent() {
         return Accent.fromName(settings().accent);
+    }
+
+    /** Soft UI click, if menu sounds are enabled. */
+    public void playClick() {
+        if (settings().sounds) {
+            MinecraftClient.getInstance().getSoundManager()
+                    .play(PositionedSoundInstance.ui(SoundEvents.UI_BUTTON_CLICK.value(), 1.6f, 0.18f));
+        }
     }
 
     public boolean isListening(Module module) {

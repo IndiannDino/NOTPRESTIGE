@@ -2,12 +2,14 @@ package dev.prestige.client;
 
 import dev.prestige.client.config.ConfigManager;
 import dev.prestige.client.gui.ClickGuiScreen;
+import dev.prestige.client.gui.hud.ToastOverlay;
 import dev.prestige.client.input.KeybindHandler;
 import dev.prestige.client.module.ModuleManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
@@ -47,6 +49,10 @@ public final class PrestigeClient implements ClientModInitializer {
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_RIGHT_SHIFT,
                 KeyBinding.Category.create(Identifier.of(MOD_ID, "main"))));
+
+        ToastOverlay toasts = new ToastOverlay(configManager::getGuiSettings);
+        moduleManager.addToggleListener(toasts::onToggle);
+        HudElementRegistry.addLast(Identifier.of(MOD_ID, "toasts"), toasts);
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onEndTick);
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> configManager.save());

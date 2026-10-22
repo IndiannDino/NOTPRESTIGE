@@ -8,4 +8,6 @@ public final class GuiSettings {
     public boolean animations = true;
     public boolean descriptions = true;
     public boolean gridView = false;
+    public boolean toasts = true;
+    public boolean sounds = true;
 }

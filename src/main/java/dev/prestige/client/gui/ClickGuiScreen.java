@@ -9,6 +9,7 @@ import dev.prestige.client.gui.page.Page;
 import dev.prestige.client.gui.page.SettingsPage;
 import dev.prestige.client.gui.page.ThemePage;
 import dev.prestige.client.gui.render.Animation;
+import dev.prestige.client.gui.render.GuiScale;
 import dev.prestige.client.gui.render.Icons;
 import dev.prestige.client.gui.render.RenderUtil;
 import dev.prestige.client.gui.theme.Theme;
@@ -98,16 +99,10 @@ public final class ClickGuiScreen extends Screen {
         currentPage.onOpen();
     }
 
-    /**
-     * Picks a pixel scale so the full-size window covers about three quarters of the screen,
-     * independent of Minecraft's GUI scale.
-     */
     private void updateScale() {
         Window mcWindow = client.getWindow();
-        float fit = Math.min(mcWindow.getFramebufferWidth() * 0.75f / Theme.WINDOW_MAX_WIDTH,
-                mcWindow.getFramebufferHeight() * 0.8f / Theme.WINDOW_MAX_HEIGHT);
-        pixelScale = Math.max(1.5f, Math.min(fit, 3f));
-        menuScale = pixelScale / mcWindow.getScaleFactor();
+        pixelScale = GuiScale.pixelScale(mcWindow);
+        menuScale = GuiScale.toGuiScale(mcWindow);
     }
 
     private static int clamp(int value, int min, int max) {
@@ -164,12 +159,25 @@ public final class ClickGuiScreen extends Screen {
         String entry = sidebar.entryAt(x, y);
         if (entry != null) {
             select(entry);
+            context.playClick();
             return true;
         }
         if (currentPage.mouseClicked(x, y, click.button())) {
+            context.playClick();
             return true;
         }
         return super.mouseClicked(click, doubled);
+    }
+
+    @Override
+    public boolean mouseDragged(Click click, double offsetX, double offsetY) {
+        return currentPage.mouseDragged(click.x() / menuScale, click.y() / menuScale)
+                || super.mouseDragged(click, offsetX, offsetY);
+    }
+
+    @Override
+    public boolean mouseReleased(Click click) {
+        return currentPage.mouseReleased() || super.mouseReleased(click);
     }
 
     @Override
