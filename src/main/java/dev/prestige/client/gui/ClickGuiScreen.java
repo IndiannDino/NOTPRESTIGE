@@ -1,196 +1,194 @@
 package dev.prestige.client.gui;
 
 import dev.prestige.client.config.ConfigManager;
-import dev.prestige.client.gui.component.CategoryPanel;
-import dev.prestige.client.gui.component.ModuleButton;
+import dev.prestige.client.gui.component.Sidebar;
+import dev.prestige.client.gui.page.ConfigsPage;
+import dev.prestige.client.gui.page.KeybindsPage;
+import dev.prestige.client.gui.page.ModulesPage;
+import dev.prestige.client.gui.page.Page;
+import dev.prestige.client.gui.page.SettingsPage;
+import dev.prestige.client.gui.page.ThemePage;
+import dev.prestige.client.gui.render.Animation;
+import dev.prestige.client.gui.render.Icons;
 import dev.prestige.client.gui.render.RenderUtil;
 import dev.prestige.client.gui.theme.Theme;
-import dev.prestige.client.gui.theme.Typography;
 import dev.prestige.client.module.Category;
-import dev.prestige.client.module.Module;
 import dev.prestige.client.module.ModuleManager;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.input.CharInput;
 import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.Window;
 import net.minecraft.text.Text;
 import net.minecraft.util.Util;
-import org.jetbrains.annotations.Nullable;
-import org.lwjgl.glfw.GLFW;
 
 /**
- * The Prestige dashboard. Owns panel z-order, keybind capture and the info footer; all row and
- * header behaviour lives in {@link CategoryPanel}. Config is saved whenever the screen closes.
+ * The Prestige menu: one centered window with a navigation sidebar on the left and the selected
+ * page on the right. Settings are saved whenever the screen closes.
  */
 public final class ClickGuiScreen extends Screen {
-    private static final String HINT =
-            "LMB toggle  ·  MMB bind  ·  RMB header collapse  ·  Drag header to move";
+    private static final String CATEGORY_PREFIX = "category:";
 
+    private final GuiContext context;
     private final ConfigManager config;
-    /** Back-to-front draw order; the last panel is on top and gets clicks first. */
-    private final List<CategoryPanel> panels = new ArrayList<>();
-
-    @Nullable
-    private Module listening;
+    private final ModulesPage modulesPage;
+    private final Map<String, Page> generalPages = new LinkedHashMap<>();
+    private final Sidebar sidebar;
+    private Page currentPage;
+    private Bounds window = new Bounds(0, 0, 0, 0);
     private long lastFrameMs;
+    /** Drawing units to GUI pixels; lets the menu keep the same size at any GUI scale. */
+    private float menuScale = 1f;
+    private float pixelScale = 2f;
 
-    public ClickGuiScreen(ModuleManager modules, ConfigManager config) {
+    public ClickGuiScreen(ModuleManager modules, ConfigManager config, KeyBinding openMenuKey) {
         super(Text.literal("Prestige"));
         this.config = config;
+        this.context = new GuiContext(modules, config, openMenuKey);
+        this.modulesPage = new ModulesPage(context);
+        generalPages.put("settings", new SettingsPage(context));
+        generalPages.put("theme", new ThemePage(context));
+        generalPages.put("configs", new ConfigsPage(context));
+        generalPages.put("keybinds", new KeybindsPage(context));
+
+        List<Sidebar.Entry> categoryEntries = new ArrayList<>();
         for (Category category : Category.values()) {
-            panels.add(new CategoryPanel(category, modules.getModules(category),
-                    config.getPanelState(category), module -> listening = module));
+            categoryEntries.add(new Sidebar.Entry(CATEGORY_PREFIX + category.name(), category.getDisplayName(),
+                    Icons.forCategory(category), () -> String.valueOf(modules.getModules(category).size())));
         }
+        List<Sidebar.Entry> generalEntries = List.of(
+                new Sidebar.Entry("settings", "Settings", Icons.SETTINGS, () -> ""),
+                new Sidebar.Entry("theme", "Theme", Icons.THEME, () -> ""),
+                new Sidebar.Entry("configs", "Configs", Icons.CONFIGS, () -> ""),
+                new Sidebar.Entry("keybinds", "Keybinds", Icons.KEYBINDS, () -> ""));
+        this.sidebar = new Sidebar(
+                List.of(new Sidebar.Section("MODULES", categoryEntries), new Sidebar.Section("GENERAL", generalEntries)),
+                () -> openMenuKey.getBoundKeyLocalizedText().getString(),
+                CATEGORY_PREFIX + Category.COMBAT.name());
+        this.currentPage = modulesPage;
+    }
+
+    private void select(String id) {
+        context.cancelListening();
+        if (id.startsWith(CATEGORY_PREFIX)) {
+            modulesPage.setCategory(Category.valueOf(id.substring(CATEGORY_PREFIX.length())));
+            currentPage = modulesPage;
+        } else {
+            currentPage = generalPages.get(id);
+        }
+        sidebar.setSelected(id);
+        currentPage.onOpen();
     }
 
     @Override
     protected void init() {
+        updateScale();
+        int unitsWide = Math.round(width / menuScale);
+        int unitsHigh = Math.round(height / menuScale);
+        int windowWidth = clamp(unitsWide - Theme.WINDOW_MARGIN * 2, Theme.WINDOW_MIN_WIDTH, Theme.WINDOW_MAX_WIDTH);
+        int windowHeight = clamp(unitsHigh - Theme.WINDOW_MARGIN * 2, Theme.WINDOW_MIN_HEIGHT, Theme.WINDOW_MAX_HEIGHT);
+        window = new Bounds((unitsWide - windowWidth) / 2, (unitsHigh - windowHeight) / 2, windowWidth, windowHeight);
         lastFrameMs = 0;
-        layoutUnplacedPanels();
-        for (CategoryPanel panel : panels) {
-            panel.clampTo(width, height);
-        }
+        currentPage.onOpen();
     }
 
-    /** Lays panels the user hasn't moved yet left-to-right, wrapping on narrow windows. */
-    private void layoutUnplacedPanels() {
-        int x = Theme.SCREEN_MARGIN;
-        int y = Theme.SCREEN_MARGIN;
-        int rowHeight = 0;
-        for (Category category : Category.values()) {
-            CategoryPanel panel = panelFor(category);
-            if (x + panel.getWidth() > width - Theme.SCREEN_MARGIN && x > Theme.SCREEN_MARGIN) {
-                x = Theme.SCREEN_MARGIN;
-                y += rowHeight + Theme.PANEL_GAP;
-                rowHeight = 0;
-            }
-            if (!panel.getState().placed) {
-                panel.getState().x = x;
-                panel.getState().y = y;
-            }
-            x += panel.getWidth() + Theme.PANEL_GAP;
-            rowHeight = Math.max(rowHeight, panel.getHeight());
-        }
+    /**
+     * Picks a pixel scale so the full-size window covers about three quarters of the screen,
+     * independent of Minecraft's GUI scale.
+     */
+    private void updateScale() {
+        Window mcWindow = client.getWindow();
+        float fit = Math.min(mcWindow.getFramebufferWidth() * 0.75f / Theme.WINDOW_MAX_WIDTH,
+                mcWindow.getFramebufferHeight() * 0.8f / Theme.WINDOW_MAX_HEIGHT);
+        pixelScale = Math.max(1.5f, Math.min(fit, 3f));
+        menuScale = pixelScale / mcWindow.getScaleFactor();
     }
 
-    private CategoryPanel panelFor(Category category) {
-        return panels.stream()
-                .filter(panel -> panel.getCategory() == category)
-                .findFirst()
-                .orElseThrow();
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(value, max));
     }
 
     @Override
-    public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.fill(0, 0, width, height, Theme.SCREEN_OVERLAY);
+    public void renderBackground(DrawContext draw, int mouseX, int mouseY, float delta) {
+        boolean blur = config.getGuiSettings().blur;
+        if (blur || client == null || client.world == null) {
+            super.renderBackground(draw, mouseX, mouseY, delta);
+        }
+        draw.fill(0, 0, width, height, blur ? Theme.SCREEN_OVERLAY : Theme.SCREEN_OVERLAY_NO_BLUR);
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+    public void render(DrawContext draw, int mouseX, int mouseY, float delta) {
         long now = Util.getMeasuringTimeMs();
         float deltaSeconds = lastFrameMs == 0 ? 0f : Math.min((now - lastFrameMs) / 1000f, 0.1f);
         lastFrameMs = now;
+        context.onFrame();
+        Animation.setEnabled(config.getGuiSettings().animations);
+        RenderUtil.setPixelScale(pixelScale);
+        int accent = context.accent().color();
+        draw.getMatrices().pushMatrix();
+        draw.getMatrices().scale(menuScale, menuScale);
+        mouseX = Math.round(mouseX / menuScale);
+        mouseY = Math.round(mouseY / menuScale);
 
-        for (CategoryPanel panel : panels) {
-            panel.render(context, textRenderer, mouseX, mouseY, deltaSeconds, listening);
-        }
-        renderFooter(context, mouseX, mouseY);
+        int x = window.x();
+        int y = window.y();
+        int radius = Theme.WINDOW_RADIUS;
+        RenderUtil.shadow(draw, x, y, window.width(), window.height(), radius, Theme.SHADOW, 6);
+        RenderUtil.roundedRect(draw, x - 1, y - 1, window.width() + 2, window.height() + 2, radius + 1, Theme.WINDOW_BORDER);
+        RenderUtil.roundedRect(draw, x, y, window.width(), window.height(), radius, Theme.WINDOW_BACKGROUND);
+        RenderUtil.roundedRect(draw, x, y, Theme.SIDEBAR_WIDTH + radius, window.height(), radius, Theme.SIDEBAR_BACKGROUND);
+        RenderUtil.rect(draw, x + Theme.SIDEBAR_WIDTH, y, radius, window.height(), Theme.WINDOW_BACKGROUND);
+        RenderUtil.rect(draw, x + Theme.SIDEBAR_WIDTH, y, 1, window.height(), Theme.DIVIDER);
+
+        sidebar.render(draw, textRenderer, new Bounds(x, y, Theme.SIDEBAR_WIDTH, window.height()),
+                mouseX, mouseY, accent, deltaSeconds);
+        currentPage.render(draw, textRenderer, contentBounds(), mouseX, mouseY, deltaSeconds);
+        draw.getMatrices().popMatrix();
     }
 
-    private void renderFooter(DrawContext context, int mouseX, int mouseY) {
-        int top = height - Theme.FOOTER_HEIGHT;
-        RenderUtil.rect(context, 0, top, width, Theme.FOOTER_HEIGHT, Theme.FOOTER_BACKGROUND);
-        RenderUtil.rect(context, 0, top, width, 1, Theme.DIVIDER);
-
-        int textY = Typography.centerY(textRenderer, top, Theme.FOOTER_HEIGHT);
-        int x = Theme.PADDING + 2;
-        Typography.heading(context, textRenderer, "PRESTIGE", x, textY, Theme.TEXT_PRIMARY);
-        x += textRenderer.getWidth("PRESTIGE") + 3;
-        Typography.caption(context, textRenderer, "CLIENT", x, textY, Theme.TEXT_MUTED);
-        x += textRenderer.getWidth("CLIENT") + Theme.PADDING * 2;
-
-        int infoColor = Theme.TEXT_SECONDARY;
-        String info;
-        if (listening != null) {
-            info = "Press a key to bind " + listening.getName() + "  ·  ESC cancel  ·  DEL unbind";
-            infoColor = listening.getCategory().getAccentColor();
-        } else {
-            Module hovered = hoveredModule(mouseX, mouseY);
-            if (hovered != null) {
-                String bind = hovered.hasKeybind() ? ModuleButton.keyName(hovered.getKeybind()) : "None";
-                info = hovered.getName() + "  ·  " + hovered.getDescription() + "  ·  Bind: " + bind;
-                infoColor = Theme.TEXT_PRIMARY;
-            } else {
-                info = HINT;
-            }
-        }
-        info = textRenderer.trimToWidth(info, width - x - Theme.PADDING);
-        Typography.body(context, textRenderer, info, x, textY, infoColor);
-    }
-
-    @Nullable
-    private Module hoveredModule(double mouseX, double mouseY) {
-        CategoryPanel top = topPanelAt(mouseX, mouseY);
-        return top == null ? null : top.getHoveredModule(mouseX, mouseY);
-    }
-
-    @Nullable
-    private CategoryPanel topPanelAt(double mouseX, double mouseY) {
-        for (int i = panels.size() - 1; i >= 0; i--) {
-            if (panels.get(i).isMouseOver(mouseX, mouseY)) {
-                return panels.get(i);
-            }
-        }
-        return null;
+    private Bounds contentBounds() {
+        return new Bounds(window.x() + Theme.SIDEBAR_WIDTH, window.y(), window.width() - Theme.SIDEBAR_WIDTH, window.height());
     }
 
     @Override
     public boolean mouseClicked(Click click, boolean doubled) {
-        // Any click while waiting for a key cancels the capture.
-        listening = null;
-        CategoryPanel panel = topPanelAt(click.x(), click.y());
-        if (panel != null && panel.mouseClicked(click.x(), click.y(), click.button())) {
-            panels.remove(panel);
-            panels.add(panel);
+        double x = click.x() / menuScale;
+        double y = click.y() / menuScale;
+        String entry = sidebar.entryAt(x, y);
+        if (entry != null) {
+            select(entry);
+            return true;
+        }
+        if (currentPage.mouseClicked(x, y, click.button())) {
             return true;
         }
         return super.mouseClicked(click, doubled);
     }
 
     @Override
-    public boolean mouseDragged(Click click, double offsetX, double offsetY) {
-        for (CategoryPanel panel : panels) {
-            if (panel.mouseDragged(click.x(), click.y(), width, height)) {
-                return true;
-            }
-        }
-        return super.mouseDragged(click, offsetX, offsetY);
-    }
-
-    @Override
-    public boolean mouseReleased(Click click) {
-        boolean handled = false;
-        for (CategoryPanel panel : panels) {
-            handled |= panel.mouseReleased(click.button());
-        }
-        return handled || super.mouseReleased(click);
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        return currentPage.mouseScrolled(mouseX / menuScale, mouseY / menuScale, verticalAmount)
+                || super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     @Override
     public boolean keyPressed(KeyInput input) {
-        if (listening == null) {
-            return super.keyPressed(input);
+        return currentPage.keyPressed(input) || super.keyPressed(input);
+    }
+
+    @Override
+    public boolean charTyped(CharInput input) {
+        if (context.consumeSwallowedChar()) {
+            return true;
         }
-        int key = input.key();
-        if (key == GLFW.GLFW_KEY_DELETE || key == GLFW.GLFW_KEY_BACKSPACE) {
-            listening.setKeybind(Module.KEY_NONE);
-        } else if (key != GLFW.GLFW_KEY_ESCAPE && key != GLFW.GLFW_KEY_UNKNOWN) {
-            listening.setKeybind(key);
-        }
-        listening = null;
-        return true;
+        return currentPage.charTyped(input) || super.charTyped(input);
     }
 
     @Override
@@ -200,10 +198,7 @@ public final class ClickGuiScreen extends Screen {
 
     @Override
     public void removed() {
-        listening = null;
-        for (CategoryPanel panel : panels) {
-            panel.cancelDrag();
-        }
+        context.cancelListening();
         config.save();
     }
 }

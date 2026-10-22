@@ -80,6 +80,14 @@ public final class ModuleManager {
         return Collections.unmodifiableList(byCategory.get(category));
     }
 
+    /** Modules whose name contains {@code query}, ignoring case. */
+    public List<Module> search(String query) {
+        String needle = query.toLowerCase(Locale.ROOT).replace(" ", "");
+        return byName.values().stream()
+                .filter(module -> module.getName().toLowerCase(Locale.ROOT).contains(needle))
+                .toList();
+    }
+
     /** Ticks every enabled module. A module that throws is disabled so it can't spam the log. */
     public void onTick() {
         for (Module module : byName.values()) {

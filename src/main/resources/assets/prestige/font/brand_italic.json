@@ -1,0 +1,15 @@
+{
+  "providers": [
+    {
+      "type": "ttf",
+      "file": "prestige:instrument/instrument-serif-italic.ttf",
+      "size": 11.5,
+      "oversample": 4.0,
+      "shift": [0.0, 0.0]
+    },
+    {
+      "type": "reference",
+      "id": "minecraft:default"
+    }
+  ]
+}
