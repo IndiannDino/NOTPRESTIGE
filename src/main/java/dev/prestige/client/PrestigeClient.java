@@ -38,7 +38,7 @@ public final class PrestigeClient implements ClientModInitializer {
         moduleManager.registerBuiltins();
 
         configManager = new ConfigManager(
-                FabricLoader.getInstance().getConfigDir().resolve("prestige_config.json"), moduleManager);
+                FabricLoader.getInstance().getConfigDir(), moduleManager);
         configManager.load();
 
         keybindHandler = new KeybindHandler(moduleManager);
@@ -68,7 +68,7 @@ public final class PrestigeClient implements ClientModInitializer {
 
     private ClickGuiScreen getClickGui() {
         if (clickGui == null) {
-            clickGui = new ClickGuiScreen(moduleManager, configManager);
+            clickGui = new ClickGuiScreen(moduleManager, configManager, openGuiKey);
         }
         return clickGui;
     }

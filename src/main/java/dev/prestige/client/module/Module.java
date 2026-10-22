@@ -22,6 +22,7 @@ public abstract class Module {
     private final String name;
     private final String description;
     private final Category category;
+    private final int defaultKeybind;
     private boolean enabled;
     private int keybind;
 
@@ -33,6 +34,7 @@ public abstract class Module {
         this.name = name;
         this.description = description;
         this.category = category;
+        this.defaultKeybind = defaultKeybind;
         this.keybind = defaultKeybind;
     }
 
@@ -93,6 +95,10 @@ public abstract class Module {
 
     public final void setKeybind(int keybind) {
         this.keybind = keybind;
+    }
+
+    public final int getDefaultKeybind() {
+        return defaultKeybind;
     }
 
     public final boolean hasKeybind() {
